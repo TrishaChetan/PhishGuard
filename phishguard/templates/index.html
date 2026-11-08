@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PhishGuard</title>
+<style>
+  :root{--bg:#0f1419;--panel:#171e26;--line:#26313d;--text:#e6edf3;--muted:#8b98a5;--accent:#4aa3ff;--bad:#ff5d5d;--warn:#f5b041;--ok:#3fb950}
+  *{box-sizing:border-box} body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:22px 24px;border-bottom:1px solid var(--line)} header h1{margin:0;font-size:22px} header p{margin:2px 0 0;color:var(--muted)}
+  main{max-width:960px;margin:0 auto;padding:24px 16px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px} .tabs button{background:var(--panel);color:var(--text);border:1px solid var(--line);padding:8px 16px;border-radius:8px;cursor:pointer}
+  .tabs button.on{border-color:var(--accent);color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  input,textarea{width:100%;background:#0b0f14;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:14px ui-monospace,monospace}
+  textarea{min-height:220px} .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn{background:var(--accent);color:#04121f;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer}
+  .ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .verdict{font-size:20px;font-weight:700;text-transform:uppercase}
+  .bar{height:10px;background:#0b0f14;border-radius:6px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%}
+  ul{margin:6px 0;padding-left:20px} .muted{color:var(--muted)} code{word-break:break-all}
+  table{width:100%;border-collapse:collapse;font-size:13px} td{border-top:1px solid var(--line);padding:6px 4px;vertical-align:top}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .kpi{background:#0b0f14;border-radius:8px;padding:10px}.kpi b{display:block;font-size:18px}
+</style>
+</head>
+<body>
+<header><h1>🛡️ PhishGuard</h1><p>Hybrid machine-learning phishing detection for URLs and emails</p></header>
+<main>
+  <div class="tabs"><button class="on" data-t="url">URL check</button><button data-t="email">Email analysis</button></div>
+
+  <section id="url" class="card">
+    <input id="u" placeholder="Paste a URL, e.g. http://paypa1-secure.xyz/login">
+    <div class="row">
+      <button class="btn" onclick="checkUrl()">Analyse</button>
+      <button class="btn ghost" onclick="ex('http://paypa1-secure.xyz/verify/a8f3k2')">Phishing example</button>
+      <button class="btn ghost" onclick="ex('https://github.com/explore')">Legit example</button>
+    </div>
+  </section>
+
+  <section id="email" class="card" hidden>
+    <textarea id="e" placeholder="Paste the full raw email (in Gmail: ⋮ → Show original)"></textarea>
+    <div class="row">
+      <button class="btn" onclick="checkEmail()">Analyse email</button>
+      <label class="btn ghost">Upload .eml <input type="file" id="f" accept=".eml,.txt" hidden onchange="upload()"></label>
+      <button class="btn ghost" onclick="sample()">Load sample phishing email</button>
+    </div>
+  </section>
+
+  <div id="out"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const color=p=>p>=.6?'var(--bad)':p>=.35?'var(--warn)':'var(--ok)';
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#url').hidden=b.dataset.t!=='url';$('#email').hidden=b.dataset.t!=='email';$('#out').innerHTML='';});
+function ex(u){$('#u').value=u;checkUrl()}
+async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){$('#out').innerHTML=`<div class="card">Error: ${esc((await r.json()).detail||r.status)}</div>`;throw 0}return r.json()}
+function list(a){return a.length?'<ul>'+a.map(x=>`<li>${esc(x)}</li>`).join('')+'</ul>':'<p class="muted">None</p>'}
+async function checkUrl(){const u=$('#u').value.trim();if(!u)return;const r=await post('/api/url',{url:u});
+  $('#out').innerHTML=`<div class="card"><div class="verdict" style="color:${color(r.probability)}">${r.verdict}</div>
+  <div class="bar"><i style="width:${r.probability*100}%;background:${color(r.probability)}"></i></div>
+  <p>Phishing probability <b>${(r.probability*100).toFixed(1)}%</b> &nbsp;·&nbsp; <span class="muted">feature model ${(r.branches.feature_model*100).toFixed(0)}% · char n-gram model ${(r.branches.char_ngram_model*100).toFixed(0)}%</span></p>
+  <h3>Red flags</h3>${list(r.reasons)}</div>`}
+function renderEmail(r){
+  const k=Object.entries(r.components).map(([n,v])=>`<div class="kpi"><span class="muted">${n}</span><b style="color:${color(v)}">${(v*100).toFixed(0)}%</b></div>`).join('');
+  const urls=r.url_results.map(x=>`<tr><td><code>${esc(x.url)}</code></td><td style="color:${color(x.probability)}">${(x.probability*100).toFixed(0)}%</td></tr>`).join('');
+  $('#out').innerHTML=`<div class="card"><div class="verdict" style="color:${color(r.score)}">${r.verdict}</div>
+  <div class="bar"><i style="width:${r.score*100}%;background:${color(r.score)}"></i></div>
+  <p><b>${esc(r.subject)}</b> <span class="muted">from ${esc(r.sender)}</span></p><div class="grid">${k}</div>
+  <h3>Header forensics</h3>${list(r.header_flags)}<h3>Content &amp; attachments</h3>${list(r.content_flags)}
+  <h3>Links</h3>${urls?`<table>${urls}</table>`:'<p class="muted">No links</p>'}</div>`}
+async function checkEmail(){const raw=$('#e').value;if(raw.length<10)return;renderEmail(await post('/api/email',{raw}))}
+async function upload(){const fd=new FormData();fd.append('file',$('#f').files[0]);
+  const r=await fetch('/api/email/upload',{method:'POST',body:fd});renderEmail(await r.json())}
+function sample(){$('#e').value=`From: "PayPal Security" <service@paypal-alerts.xyz>
+Reply-To: support.team.verify@gmail.com
+Return-Path: <bounce@mailer-srv.ru>
+To: you@example.com
+Subject: URGENT: Your account has been suspended
+Authentication-Results: mx.example.com; spf=fail smtp.mailfrom=mailer-srv.ru; dkim=none; dmarc=fail
+Content-Type: text/html; charset=utf-8
+
+<p>Dear Customer,</p>
+<p>We detected unusual activity. Your account will be suspended within 24 hours unless you verify your account.</p>
+<p><a href="http://paypa1-secure.xyz/login/verify?id=88213">https://www.paypal.com/myaccount</a></p>
+<p>Please confirm your password and card number.</p>`;checkEmail()}
+</script>
+</body>
+</html>
