@@ -3,6 +3,8 @@
 PhishGuard detects phishing in **URLs** and **raw emails** using a hybrid machine-learning model
 plus explainable forensic rules. It ships with a REST API, a web dashboard, a CLI, tests and Docker.
 
+![tests](https://github.com/TrishaChetan/PhishGuard/actions/workflows/tests.yml/badge.svg)
+
 > Final-year cybersecurity project · Python · scikit-learn · FastAPI
 
 ## Features
