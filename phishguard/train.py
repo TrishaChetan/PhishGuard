@@ -82,7 +82,9 @@ def main(argv=None):
         df["label"] = 1 - df["label"]
     if len(df) > args.max_rows:
         df = df.sample(args.max_rows, random_state=1)
-    X, y = df["url"].values, df["label"].values
+    # to_numpy(dtype=object) keeps this working on pandas 3, where .values
+    # returns an Arrow-backed string array that sklearn cannot index
+    X, y = df["url"].to_numpy(dtype=object), df["label"].to_numpy(dtype=int)
     X_tr, X_tmp, y_tr, y_tmp = train_test_split(X, y, test_size=0.3, stratify=y, random_state=1)
     X_val, X_te, y_val, y_te = train_test_split(X_tmp, y_tmp, test_size=0.5, stratify=y_tmp, random_state=1)
     print(f"[data] {len(df)} URLs  train={len(X_tr)} val={len(X_val)} test={len(X_te)}  phishing={y.mean():.1%}")

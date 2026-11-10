@@ -46,6 +46,50 @@ FEATURE_NAMES = [
 ]
 
 
+# Threat-intel feeds, tickets and chat usually share malicious URLs "defanged"
+# so nobody clicks them by accident: hxxps://paypa1[.]com/login
+_REFANG_RULES = [
+    (re.compile(r"^\s*h(?:xx|XX|\*\*)p(s?)(?:\[:\]|:)//", re.I), lambda m: f"http{m.group(1).lower()}://"),
+    (re.compile(r"^\s*fxp(?:\[:\]|:)//", re.I), "ftp://"),
+    (re.compile(r"\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}", re.I), "."),
+    (re.compile(r"\[\s*:\s*\]"), ":"),
+    (re.compile(r"\[\s*(?:@|at)\s*\]", re.I), "@"),
+    (re.compile(r"\[/\]"), "/"),
+]
+
+
+def refang(url: str) -> str:
+    """Turn a defanged indicator back into a parseable URL.
+
+    >>> refang("hxxps://paypa1[.]com/login")
+    'https://paypa1.com/login'
+    """
+    out = url.strip()
+    for pattern, repl in _REFANG_RULES:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def is_defanged(url: str) -> bool:
+    return refang(url) != url.strip()
+
+
+def defang(url: str) -> str:
+    """Make a URL safe to paste into reports/chat (not clickable).
+
+    >>> defang("https://paypa1.com/login")
+    'hxxps://paypa1[.]com/login'
+    """
+    url = refang(url)
+    url = re.sub(r"^http", "hxxp", url, flags=re.I)
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        scheme, rest = "", url
+    host, slash, tail = rest.partition("/")
+    host = host.replace(".", "[.]")
+    return f"{scheme}{sep}{host}{slash}{tail}"
+
+
 @dataclass
 class ParsedURL:
     raw: str
@@ -57,7 +101,7 @@ class ParsedURL:
 
 
 def _normalise(url: str) -> ParsedURL:
-    url = url.strip()
+    url = refang(url)
     if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
         url = "http://" + url
     p = urlparse(url)

@@ -3,6 +3,9 @@
     python -m phishguard.cli url "http://paypa1-secure.xyz/login"
     python -m phishguard.cli email samples/phish.eml
     python -m phishguard.cli batch urls.txt --csv out.csv
+
+Defanged input such as hxxps://paypa1[.]com is accepted everywhere.
+Add --defang to print URLs in defanged form (safe to paste into tickets/chat).
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from pathlib import Path
 
 from .email_analyzer import analyze_email
 from .model import HybridURLModel
+from .url_features import defang as _defang
 
 
 def main(argv=None):
@@ -23,14 +27,17 @@ def main(argv=None):
     u = sub.add_parser("url"); u.add_argument("url"); u.add_argument("--json", action="store_true")
     e = sub.add_parser("email"); e.add_argument("path"); e.add_argument("--json", action="store_true")
     b = sub.add_parser("batch"); b.add_argument("path"); b.add_argument("--csv")
+    for p in (u, e, b):
+        p.add_argument("--defang", action="store_true", help="print URLs defanged (hxxp://example[.]com)")
     args = ap.parse_args(argv)
+    show = _defang if args.defang else (lambda x: x)
     model = HybridURLModel.load()
 
     if args.cmd == "url":
         r = model.analyse(args.url)
         if args.json:
             print(json.dumps(r, indent=2)); return
-        print(f"{r['verdict'].upper():<11} {r['probability']:.1%}  {r['url']}")
+        print(f"{r['verdict'].upper():<11} {r['probability']:.1%}  {show(r['url'])}")
         for reason in r["reasons"]:
             print("  -", reason)
     elif args.cmd == "email":
@@ -42,14 +49,14 @@ def main(argv=None):
         for f in rep.header_flags + rep.content_flags:
             print("  -", f)
         for x in rep.url_results:
-            print(f"  link {x['probability']:.0%}  {x['url']}")
+            print(f"  link {x['probability']:.0%}  {show(x['url'])}")
     else:
         urls = [l.strip() for l in Path(args.path).read_text().splitlines() if l.strip()]
         probs = model.predict_proba(urls)
         out = csv.writer(open(args.csv, "w", newline="") if args.csv else sys.stdout)
         out.writerow(["url", "probability", "phishing"])
         for url, p in zip(urls, probs):
-            out.writerow([url, f"{p:.4f}", int(p >= model.threshold)])
+            out.writerow([show(url), f"{p:.4f}", int(p >= model.threshold)])
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
-from .url_features import FEATURE_NAMES, explain, extract
+from .url_features import FEATURE_NAMES, explain, extract, is_defanged, refang
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "phishguard.joblib"
 
@@ -47,7 +47,8 @@ class HybridURLModel:
         return self
 
     def branch_proba(self, urls) -> tuple[np.ndarray, np.ndarray]:
-        urls = list(urls)
+        # accept defanged indicators (hxxp://evil[.]com) by refanging first
+        urls = [refang(u) for u in urls]
         return self.rf.predict_proba(featurize(urls))[:, 1], self.text.predict_proba(urls)[:, 1]
 
     def predict_proba(self, urls) -> np.ndarray:
@@ -77,11 +78,14 @@ class HybridURLModel:
         return [(n, round(float(v), 4)) for n, v in imp[:k]]
 
     def analyse(self, url: str) -> dict:
+        was_defanged = is_defanged(url)
+        url = refang(url)
         a, b = self.branch_proba([url])
         p = float(self.w_features * a[0] + (1 - self.w_features) * b[0])
         feats = extract(url)
         return {
             "url": url,
+            "input_was_defanged": was_defanged,
             "probability": round(p, 4),
             "verdict": "phishing" if p >= self.threshold else ("suspicious" if p >= self.threshold * 0.6 else "legitimate"),
             "branches": {"feature_model": round(float(a[0]), 4), "char_ngram_model": round(float(b[0]), 4)},
