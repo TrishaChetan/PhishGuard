@@ -14,6 +14,7 @@ plus explainable forensic rules. It ships with a REST API, a web dashboard, a CL
 | **URL model** | 28 engineered lexical/host features → Random Forest, fused with a character 2–5-gram TF-IDF → Logistic Regression model. Fusion weight and threshold are tuned on a validation split. |
 | **Typosquat detection** | Levenshtein distance + homoglyph substitution (`0→o`, `1→l`, …) against 25 high-value brands (PayPal, HDFC, SBI, Paytm, Microsoft…). |
 | **Email forensics** | SPF/DKIM/DMARC results, From vs Reply-To vs Return-Path mismatch, display-name spoofing. |
+| **Sender impersonation** | Lookalike sender domains (`service@paypa1.com`, `paypal-security.com`) and brand display names sent from unrelated domains (`"HDFC Bank" <noreply@secure-update.top>`), with an allow-list so genuine senders like Office 365 via outlook.com aren't flagged. |
 | **Email content** | Urgency, credential requests, reward bait, generic greetings, embedded HTML forms. |
 | **Deceptive links** | Anchor text shows `paypal.com` but `href` points elsewhere. Every link is scored by the URL model. |
 | **Attachments** | Risky types (`.html`, `.iso`, `.lnk`, macro docs) and double extensions (`invoice.pdf.html`). |

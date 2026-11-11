@@ -16,7 +16,7 @@ from email import policy
 from email.utils import parseaddr
 from html.parser import HTMLParser
 
-from .url_features import registered_domain
+from .url_features import BRANDS, HOMOGLYPHS, levenshtein, registered_domain
 
 URGENCY = [
     "urgent", "immediately", "within 24 hours", "action required", "suspended",
@@ -69,6 +69,54 @@ class EmailReport:
     url_results: list[dict] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
     components: dict[str, float] = field(default_factory=dict)
+
+
+# Brands that legitimately send from a domain whose name differs from the brand
+BRAND_SENDER_LABELS = {
+    "office365": {"microsoft", "office", "office365", "outlook", "live", "hotmail"},
+    "outlook": {"microsoft", "outlook", "live", "hotmail", "office"},
+    "microsoft": {"microsoft", "office", "outlook", "live", "hotmail", "microsoftonline"},
+    "facebook": {"facebook", "facebookmail", "meta"},
+    "instagram": {"instagram", "facebookmail", "meta"},
+    "whatsapp": {"whatsapp", "facebookmail", "meta"},
+    "google": {"google", "gmail", "youtube"},
+    "amazon": {"amazon", "amazonses", "aws"},
+    "sbi": {"sbi", "onlinesbi", "sbicard"},
+}
+
+
+def brands_in_display_name(name: str) -> list[str]:
+    """Brands named in a From display name ("PayPal Support", "HDFC Bank").
+
+    Matches whole words and adjacent word pairs/triples, so "HDFC Bank" finds
+    hdfcbank but "Pineapple Deals" does not find apple.
+    """
+    words = re.findall(r"[a-z0-9]+", name.lower())
+    candidates = set(words)
+    for n in (2, 3):
+        candidates |= {"".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+    return [b for b in BRANDS if b in candidates]
+
+
+def sender_lookalike(domain: str) -> str | None:
+    """Brand a sender domain imitates, or None.
+
+    Stricter than the URL feature: a brand merely appearing inside a longer
+    word (pineapple-deals.com) is fine; homoglyphs (paypa1), 1-2 typos
+    (micosoft) or brand-plus-hyphen (paypal-security) are not.
+    """
+    label = registered_domain(domain).split(".")[0]
+    if not label or label in BRANDS:
+        return None
+    deglyphed = label.translate(HOMOGLYPHS)
+    for b in BRANDS:
+        if deglyphed == b:
+            return b
+        if len(b) >= 5 and levenshtein(label, b) <= (1 if len(b) < 8 else 2):
+            return b
+        if re.match(rf"^{b}-|-{b}$", label):
+            return b
+    return None
 
 
 def _domain_of(addr: str) -> str:
@@ -127,6 +175,19 @@ def analyze_email(raw: str | bytes, url_scorer=None) -> EmailReport:
         shown = re.search(r"[a-z0-9-]+\.(com|net|org|in)", from_name, re.I)
         if shown and registered_domain(shown.group(0).lower()) != registered_domain(from_dom):
             header_flags.append(f"Display name shows '{shown.group(0)}' but real sender is {from_dom}"); h += 0.3
+    # Lookalike sender domain, e.g. service@paypa1.com or alerts@micr0soft.com
+    imitated = sender_lookalike(from_dom) if from_dom else None
+    if imitated:
+        header_flags.append(f"Sender domain {from_dom} imitates {imitated} (lookalike domain)"); h += 0.4
+    # Brand in the display name but mail comes from an unrelated domain,
+    # e.g. "PayPal Support" <alerts@random-mailer.xyz>
+    if from_name and from_dom:
+        label = registered_domain(from_dom).split(".")[0]
+        for brand in brands_in_display_name(from_name):
+            allowed = BRAND_SENDER_LABELS.get(brand, {brand})
+            if label not in allowed and not any(a in label for a in allowed):
+                header_flags.append(f"Display name claims to be {brand} but sender domain is {from_dom}"); h += 0.35
+                break
     auth = _auth_results(msg)
     for mech, res in auth.items():
         if res in {"fail", "softfail", "none", "permerror"}:
