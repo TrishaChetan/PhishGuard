@@ -19,6 +19,7 @@ plus explainable forensic rules. It ships with a REST API, a web dashboard, a CL
 | **Deceptive links** | Anchor text shows `paypal.com` but `href` points elsewhere. Every link is scored by the URL model. |
 | **Attachments** | Risky types (`.html`, `.iso`, `.lnk`, macro docs) and double extensions (`invoice.pdf.html`). |
 | **Explainability** | Every verdict comes with human-readable red flags and per-branch probabilities. |
+| **Allow-list** | Trust your own domains to stop false positives: `allowlist.txt` (see `allowlist.example.txt`), `PHISHGUARD_ALLOWLIST=a.com,b.com`, or `--allowlist FILE`. Matches the registered domain only, so `example.com` trusts `login.example.com` but never `example.com.evil.xyz`. |
 | **Defanged IOCs** | Paste indicators straight from threat-intel feeds — `hxxps://paypa1[.]com`, `evil(.)xyz`, `[:]//` are refanged automatically. `--defang` prints results in safe, non-clickable form. |
 | **Interfaces** | Web UI, REST API (OpenAPI docs at `/docs`), CLI (single / batch / email). |
 

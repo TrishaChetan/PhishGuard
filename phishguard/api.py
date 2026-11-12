@@ -12,6 +12,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from . import allowlist as _allow
 from .email_analyzer import analyze_email
 from .model import DEFAULT_MODEL_PATH, HybridURLModel
 
@@ -39,9 +40,14 @@ class EmailRequest(BaseModel):
     raw: str = Field(..., min_length=10, max_length=2_000_000, description="Full raw email incl. headers")
 
 
+@lru_cache(maxsize=1)
+def get_allowlist() -> frozenset:
+    return frozenset(_allow.load_allowlist())
+
+
 def _scorer(url: str):
-    r = get_model().analyse(url)
-    return r["probability"], r["reasons"]
+    r = get_model().analyse(url, get_allowlist())
+    return (0.0 if r["allowlisted"] else r["probability"]), r["reasons"]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -57,15 +63,26 @@ def health():
 
 @app.post("/api/url")
 def check_url(req: URLRequest):
-    return get_model().analyse(req.url)
+    return get_model().analyse(req.url, get_allowlist())
 
 
 @app.post("/api/urls")
 def check_urls(req: BatchRequest):
     m = get_model()
     probs = m.predict_proba(req.urls)
-    return [{"url": u, "probability": round(float(p), 4), "phishing": bool(p >= m.threshold)}
-            for u, p in zip(req.urls, probs)]
+    allow = get_allowlist()
+    out = []
+    for u, p in zip(req.urls, probs):
+        trusted = _allow.match(u, allow)
+        out.append({"url": u, "probability": round(float(p), 4),
+                    "phishing": bool(p >= m.threshold) and not trusted, "allowlisted": trusted})
+    return out
+
+
+@app.get("/api/allowlist")
+def show_allowlist():
+    """Domains currently trusted (from PHISHGUARD_ALLOWLIST / allowlist.txt)."""
+    return sorted(get_allowlist())
 
 
 @app.post("/api/email")

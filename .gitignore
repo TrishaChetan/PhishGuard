@@ -6,3 +6,5 @@ venv/
 models/*.joblib
 data/*.csv
 .env
+
+allowlist.txt

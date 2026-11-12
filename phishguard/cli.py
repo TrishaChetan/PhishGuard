@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .email_analyzer import analyze_email
 from .model import HybridURLModel
+from . import allowlist as _allow
 from .url_features import defang as _defang
 
 
@@ -29,12 +30,14 @@ def main(argv=None):
     b = sub.add_parser("batch"); b.add_argument("path"); b.add_argument("--csv")
     for p in (u, e, b):
         p.add_argument("--defang", action="store_true", help="print URLs defanged (hxxp://example[.]com)")
+        p.add_argument("--allowlist", metavar="FILE", help="trusted domains, one per line (also: allowlist.txt, PHISHGUARD_ALLOWLIST)")
     args = ap.parse_args(argv)
+    allow = _allow.load_allowlist(args.allowlist)
     show = _defang if args.defang else (lambda x: x)
     model = HybridURLModel.load()
 
     if args.cmd == "url":
-        r = model.analyse(args.url)
+        r = model.analyse(args.url, allow)
         if args.json:
             print(json.dumps(r, indent=2)); return
         print(f"{r['verdict'].upper():<11} {r['probability']:.1%}  {show(r['url'])}")
@@ -42,7 +45,7 @@ def main(argv=None):
             print("  -", reason)
     elif args.cmd == "email":
         rep = analyze_email(Path(args.path).read_bytes(),
-                            url_scorer=lambda x: (lambda r: (r["probability"], r["reasons"]))(model.analyse(x)))
+                            url_scorer=lambda x: (lambda r: (0.0 if r["allowlisted"] else r["probability"], r["reasons"]))(model.analyse(x, allow)))
         if args.json:
             print(json.dumps(asdict(rep), indent=2)); return
         print(f"{rep.verdict.upper()}  score={rep.score:.2f}  subject={rep.subject!r}")
@@ -54,9 +57,10 @@ def main(argv=None):
         urls = [l.strip() for l in Path(args.path).read_text().splitlines() if l.strip()]
         probs = model.predict_proba(urls)
         out = csv.writer(open(args.csv, "w", newline="") if args.csv else sys.stdout)
-        out.writerow(["url", "probability", "phishing"])
+        out.writerow(["url", "probability", "phishing", "allowlisted"])
         for url, p in zip(urls, probs):
-            out.writerow([show(url), f"{p:.4f}", int(p >= model.threshold)])
+            trusted = _allow.match(url, allow)
+            out.writerow([show(url), f"{p:.4f}", int(p >= model.threshold and not trusted), trusted or ""])
 
 
 if __name__ == "__main__":

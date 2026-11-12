@@ -21,6 +21,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
+from . import allowlist as _allow
 from .url_features import FEATURE_NAMES, explain, extract, is_defanged, refang
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "phishguard.joblib"
@@ -77,19 +78,27 @@ class HybridURLModel:
         imp = sorted(zip(FEATURE_NAMES, self.rf.feature_importances_), key=lambda x: -x[1])
         return [(n, round(float(v), 4)) for n, v in imp[:k]]
 
-    def analyse(self, url: str) -> dict:
+    def analyse(self, url: str, allowlist: set[str] | None = None) -> dict:
         was_defanged = is_defanged(url)
         url = refang(url)
         a, b = self.branch_proba([url])
         p = float(self.w_features * a[0] + (1 - self.w_features) * b[0])
         feats = extract(url)
+        trusted = _allow.match(url, allowlist or set())
+        verdict = "phishing" if p >= self.threshold else ("suspicious" if p >= self.threshold * 0.6 else "legitimate")
+        reasons = explain(feats)
+        if trusted:
+            # keep the raw model score for transparency, but trust the domain
+            verdict = "legitimate"
+            reasons = [f"Domain {trusted} is on your allow-list"] + reasons
         return {
             "url": url,
             "input_was_defanged": was_defanged,
             "probability": round(p, 4),
-            "verdict": "phishing" if p >= self.threshold else ("suspicious" if p >= self.threshold * 0.6 else "legitimate"),
+            "verdict": verdict,
+            "allowlisted": trusted,
             "branches": {"feature_model": round(float(a[0]), 4), "char_ngram_model": round(float(b[0]), 4)},
-            "reasons": explain(feats),
+            "reasons": reasons,
             "features": feats,
         }
 

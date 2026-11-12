@@ -1,0 +1,7 @@
+# PhishGuard trusted domains — copy to allowlist.txt and edit.
+# One registered domain per line. Subdomains are trusted automatically
+# (example.com trusts login.example.com), lookalikes are not
+# (example.com does NOT trust example.com.evil.xyz or example-login.com).
+
+# your-company.com
+# your-sso-provider.com
