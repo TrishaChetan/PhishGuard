@@ -29,6 +29,40 @@ CREDENTIAL = [
 ]
 REWARD = ["you have won", "lottery", "prize", "gift card", "refund", "claim your", "bonus"]
 GENERIC_GREETING = re.compile(r"^\s*(dear (customer|user|client|member|account holder|sir/madam)|hello user)", re.I | re.M)
+# Unicode bidi controls let "invoice\u202efdp.exe" display as "invoiceexe.pdf"
+BIDI_CHARS = re.compile("[\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]")
+DECOY_EXT = r"(pdf|docx?|xlsx?|pptx?|txt|rtf|csv|jpe?g|png|gif|mp3|mp4|wav)"
+EXEC_EXT = r"(exe|scr|com|pif|js|jse|vbs|vbe|wsf|bat|cmd|ps1|hta|lnk|msi|jar|iso|img|html?|svg)"
+HTML_FORM = re.compile(r"<form\b|type\s*=\s*[\"']?password|\.(?:submit|send)\s*\(|fetch\s*\(|XMLHttpRequest|"
+                       r"atob\s*\(|window\.location\s*=|document\.write\s*\(\s*(?:unescape|atob)", re.I)
+
+
+def inspect_attachment(filename: str, payload: bytes | None) -> tuple[list[str], float]:
+    """Flags and a 0-1 risk score for one attachment."""
+    flags: list[str] = []
+    score = 0.0
+    shown = BIDI_CHARS.sub("", filename)
+    if BIDI_CHARS.search(filename):
+        # what the user sees vs. what Windows runs
+        flags.append(f"Hidden text-direction characters disguise the real file type: {shown!r}")
+        score = max(score, 0.8)
+    if re.search(r"\s{5,}\.\w+$", shown) or re.search(r"[_.\-]{8,}\.\w+$", shown):
+        flags.append(f"Long padding pushes the real extension out of view: {shown.strip()}")
+        score = max(score, 0.6)
+    if re.search(rf"\.{DECOY_EXT}\s*\.{EXEC_EXT}$", shown, re.I):
+        flags.append(f"Double extension trick: {shown}")
+        score = max(score, 0.6)
+    elif RISKY_ATTACHMENTS.search(shown):
+        flags.append(f"Risky attachment type: {shown}")
+        score = max(score, 0.4)
+    if re.search(r"\.(html?|svg|xhtml)$", shown, re.I) and payload:
+        text = payload[:500_000].decode("utf-8", "ignore")
+        if HTML_FORM.search(text):
+            flags.append(f"HTML attachment contains a login form or script that sends data: {shown}")
+            score = max(score, 0.75)
+    return flags, score
+
+
 RISKY_ATTACHMENTS = re.compile(r"\.(exe|scr|js|vbs|bat|cmd|iso|img|lnk|hta|docm|xlsm|zip|rar|html?)$", re.I)
 URL_RE = re.compile(r"https?://[^\s\"'<>)]+", re.I)
 
@@ -235,13 +269,20 @@ def analyze_email(raw: str | bytes, url_scorer=None) -> EmailReport:
             url_results.append({"url": url, "probability": round(p, 3), "reasons": reasons})
             u = max(u, p)
 
-    attachments = [p.get_filename() for p in msg.iter_attachments() if p.get_filename()]
+    attachments = []
     a = 0.0
-    for fn in attachments:
-        if RISKY_ATTACHMENTS.search(fn):
-            content_flags.append(f"Risky attachment type: {fn}"); a = 0.4
-        if re.search(r"\.(pdf|docx?|xlsx?)\.(exe|js|scr|html?)$", fn, re.I):
-            content_flags.append(f"Double extension trick: {fn}"); a = 0.6
+    for part in msg.iter_attachments():
+        fn = part.get_filename()
+        if not fn:
+            continue
+        attachments.append(fn)
+        try:
+            payload = part.get_payload(decode=True)
+        except Exception:
+            payload = None
+        flags, risk = inspect_attachment(fn, payload)
+        content_flags.extend(flags)
+        a = max(a, risk)
 
     components = {
         "headers": round(min(1.0, h), 3),
